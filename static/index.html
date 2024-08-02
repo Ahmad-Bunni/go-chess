@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Chess</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"
+    />
+    <style>
+      #board {
+        width: 400px;
+        margin: 0 auto;
+      }
+      #status,
+      #pgn {
+        margin-top: 10px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Chess <span id="code"></span></h1>
+    <div id="board"></div>
+    <div id="status"></div>
+    <div id="pgn"></div>
+    <button id="flip">Flip Board</button>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script>
+      const board = Chessboard("board", {
+        draggable: true,
+        dropOffBoard: "trash",
+        position: "start",
+        pieceTheme: "img/pieces/{piece}.png",
+        onDrop: handleMove,
+        onSnapEnd: onSnapEnd,
+      });
+
+      const game = new Chess();
+
+      $("#flip").on("click", board.flip);
+
+      let socket;
+      const gameCode = prompt("Enter Game Code");
+
+      function connect() {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/ws/${gameCode}`;
+
+        socket = new WebSocket(wsUrl);
+
+        socket.addEventListener("open", function (event) {
+          console.log("Connected to WebSocket server");
+        });
+
+        socket.addEventListener("message", function (event) {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "move") {
+            game.move(msg.move);
+            board.position(game.fen());
+            updateStatus();
+          }
+        });
+
+        socket.addEventListener("close", function (event) {
+          console.log("Disconnected from WebSocket server");
+          setTimeout(connect, 5000); // Attempt to reconnect after 5 seconds
+        });
+
+        socket.addEventListener("error", function (event) {
+          console.error("WebSocket error:", event);
+        });
+      }
+
+      connect();
+
+      function handleMove(source, target) {
+        const move = game.move({
+          from: source,
+          to: target,
+          promotion: "q", // promote to queen
+        });
+
+        if (move === null) return "snapback"; // illegal move
+
+        sendMessage({
+          type: "move",
+          move: move,
+        });
+
+        updateStatus();
+      }
+
+      function onSnapEnd() {
+        board.position(game.fen());
+      }
+
+      function sendMessage(msg) {
+        msg.gameCode = gameCode;
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(msg));
+        } else {
+          console.warn("WebSocket is not open. Message not sent:", msg);
+        }
+      }
+
+      function updateStatus() {
+        let status = "";
+        let moveColor = "White";
+        if (game.turn() === "b") {
+          moveColor = "Black";
+        }
+
+        if (game.in_checkmate()) {
+          status = "Game over, " + moveColor + " is in checkmate.";
+        } else if (game.in_draw()) {
+          status = "Game over, drawn position";
+        } else {
+          status = moveColor + " to move";
+
+          if (game.in_check()) {
+            status += ", " + moveColor + " is in check";
+          }
+        }
+
+        document.getElementById("code").innerText = gameCode;
+        document.getElementById("status").innerText = status;
+        document.getElementById("pgn").innerText = game.pgn();
+      }
+
+      updateStatus();
+    </script>
+  </body>
+</html>
